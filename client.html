@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess-like Game</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #eaeaea;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #game-container {
+            text-align: center;
+        }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(5, 50px);
+            grid-template-rows: repeat(5, 50px);
+            gap: 5px;
+            margin: 20px auto;
+        }
+        .square {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #333;
+            background-color: #333;
+            color: #fff;
+            cursor: pointer;
+        }
+        .square.selected {
+            background-color: #555;
+        }
+        .A { background-color: #007bff; }
+        .B { background-color: #dc3545; }
+        .controls {
+            margin-top: 20px;
+        }
+        .control-button {
+            margin: 5px;
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+        .control-button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+        }
+        #move-history {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .move-list {
+            margin: 0 10px;
+            list-style-type: none;
+            padding: 0;
+        }
+        .move-list li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h2 id="current-player">Current Player: </h2>
+    <div id="board"></div>
+    <div id="selected-info">Selected: None</div>
+    <div class="controls">
+        <button id="L" class="control-button" disabled>L</button>
+        <button id="R" class="control-button" disabled>R</button>
+        <button id="F" class="control-button" disabled>F</button>
+        <button id="B" class="control-button" disabled>B</button>
+        <button id="FL" class="control-button" disabled>FL</button>
+        <button id="FR" class="control-button" disabled>FR</button>
+        <button id="BL" class="control-button" disabled>BL</button>
+        <button id="BR" class="control-button" disabled>BR</button>
+    </div>
+    <div id="status"></div>
+    <div id="move-history">
+        <ul id="player-a-history" class="move-list"></ul>
+        <ul id="player-b-history" class="move-list"></ul>
+    </div>
+</div>
+
+<script>
+    const boardDiv = document.getElementById("board");
+    const statusDiv = document.getElementById("status");
+    const currentPlayerDiv = document.getElementById("current-player");
+    const selectedInfoDiv = document.getElementById("selected-info");
+    const controlButtons = document.querySelectorAll(".control-button");
+    const playerAHistory = document.getElementById("player-a-history");
+    const playerBHistory = document.getElementById("player-b-history");
+
+    let board = [];
+    let player = null;
+    let currentTurn = null;
+    let selectedPiece = null;
+
+    const socket = new WebSocket("ws://localhost:8080");
+
+    socket.addEventListener("open", () => {
+        console.log("Connected to server");
+    });
+
+    socket.addEventListener("message", (event) => {
+        const data = JSON.parse(event.data);
+        console.log("Message from server:", data);
+
+        if (data.type === "init") {
+            player = data.player;
+            board = data.board;
+            currentTurn = data.currentTurn;
+            renderBoard();
+            currentPlayerDiv.innerText = `Current Player: ${currentTurn}`;
+            statusDiv.innerText = `You are Player ${player}`;
+        } else if (data.type === "update") {
+            board = data.board;
+            currentTurn = data.currentTurn;
+            renderBoard();
+            currentPlayerDiv.innerText = `Current Player: ${currentTurn}`;
+            selectedPiece = null;
+            updateControls();
+            addMoveToHistory(data.move);
+        } else if (data.type === "error") {
+            alert(data.message);
+        } else if (data.type === "win") {
+            alert(`Player ${data.winner} wins!`);
+            statusDiv.innerText = `Player ${data.winner} wins!`;
+        }
+    });
+
+    function renderBoard() {
+        boardDiv.innerHTML = "";
+        board.forEach((row, i) => {
+            row.forEach((piece, j) => {
+                const square = document.createElement("div");
+                square.className = "square";
+                if (piece) {
+                    square.innerText = piece;
+                    square.classList.add(piece.charAt(0)); // A or B for player
+                }
+                square.addEventListener("click", () => selectPiece(i, j, piece));
+                boardDiv.appendChild(square);
+            });
+        });
+        updateSelectedSquare();
+    }
+
+    function selectPiece(i, j, piece) {
+        if (piece && piece.charAt(0) === player) {
+            selectedPiece = { piece, position: { i, j } };
+            selectedInfoDiv.innerText = `Selected: ${piece}`;
+            updateControls();
+            updateSelectedSquare();
+        }
+    }
+
+    function updateSelectedSquare() {
+        const squares = document.querySelectorAll(".square");
+        squares.forEach(square => square.classList.remove("selected"));
+        if (selectedPiece) {
+            const { i, j } = selectedPiece.position;
+            squares[i * 5 + j].classList.add("selected");
+        }
+    }
+
+    function updateControls() {
+        controlButtons.forEach(button => {
+            button.disabled = selectedPiece === null || currentTurn !== player;
+            button.onclick = () => makeMove(button.id);
+        });
+    }
+
+    function makeMove(direction) {
+        const move = {
+            character: selectedPiece.piece,
+            direction
+        };
+        socket.send(JSON.stringify({ type: "move", move }));
+    }
+
+    function addMoveToHistory(move) {
+        const moveItem = document.createElement("li");
+        moveItem.innerText = `${move.character}: ${move.direction}`;
+        if (currentTurn === 'A') {
+            playerBHistory.appendChild(moveItem);
+        } else {
+            playerAHistory.appendChild(moveItem);
+        }
+    }
+</script>
+
+</body>
+</html>
